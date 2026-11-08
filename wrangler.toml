@@ -1,0 +1,30 @@
+name = "api-indonesia-integrations"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+workers_dev = false
+
+routes = [
+  { pattern = "integrations.apiindonesia.id", custom_domain = true }
+]
+
+[vars]
+BASE_URL = "https://integrations.apiindonesia.id"
+NOTION_CLIENT_ID = "412d872b-594c-817e-b952-00373ec0bcb0"
+LINEAR_CLIENT_ID = "f5547718bdd0ed34f47a2c904781fd4f"
+# Max external subrequests per scheduled run (Workers free plan allows 50).
+SUBREQ_BUDGET = "45"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "api-indonesia-integrations"
+database_id = "7d7a245c-4a80-42fd-9f76-b48e1738ed92"
+migrations_dir = "migrations"
+
+[triggers]
+# Every 15 minutes: each install is synced once a day, plus any backlog left from rate/subrequest limits.
+crons = ["*/15 * * * *"]
+
+[observability]
+enabled = true
+
+# Secrets (set with `wrangler secret put`): ENC_KEY (base64, 32 bytes), NOTION_CLIENT_SECRET, LINEAR_CLIENT_SECRET
