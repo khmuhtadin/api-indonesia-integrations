@@ -205,7 +205,7 @@ function linearPage() {
 <ol>
 <li>Paste your API Indonesia key and click <b>Connect to Linear</b>, then approve access in Linear.</li>
 <li>Pick the team that should receive holiday issues and how far ahead to look.</li>
-<li>The integration creates a "Holiday" label in that team if it does not exist, then creates one issue per upcoming holiday, for example "Hari libur: Idulfitri 1448 H (Wed, 10 Mar 2027)".</li>
+<li>The integration uses an existing "Holiday" label (team or workspace) or creates one if it does not exist, then creates one issue per upcoming holiday, for example "Hari libur: Idulfitri 1448 H (Wed, 10 Mar 2027)".</li>
 <li>It checks once a day. Each holiday gets one issue only, so nothing is duplicated, and issues are never edited or closed by the integration.</li>
 </ol>
 <h2>Permissions</h2><p>The app asks for Linear's <code>read</code> and <code>write</code> scopes: read to list your teams and labels, write to create the "Holiday" label and the issues. Actions appear as made by the API Indonesia app.</p>
@@ -625,11 +625,17 @@ async function ensureLabel(token, teamId) {
   const all = [...(q.team?.labels?.nodes || []), ...(q.issueLabels?.nodes || [])];
   const hit = all.find((l) => l.name.toLowerCase() === LABEL_NAME.toLowerCase());
   if (hit) return hit.id;
-  const c = await linearGql(
-    token,
-    `mutation($input: IssueLabelCreateInput!) { issueLabelCreate(input: $input) { success issueLabel { id } } }`,
-    { input: { name: LABEL_NAME, color: '#FF4F00', teamId, description: 'Indonesian public holiday or cuti bersama (API Indonesia)' } }
-  );
+  const create = (input) =>
+    linearGql(token, `mutation($input: IssueLabelCreateInput!) { issueLabelCreate(input: $input) { success issueLabel { id } } }`, {
+      input: { name: LABEL_NAME, color: '#FF4F00', ...input },
+    });
+  let c;
+  try {
+    c = await create({ teamId });
+  } catch (e) {
+    console.error('team label create failed', e.message);
+    c = await create({});
+  }
   return c.issueLabelCreate.issueLabel.id;
 }
 
@@ -641,15 +647,19 @@ async function linearSetupPost(request, env) {
   const form = await request.formData();
   const teamId = String(form.get('team_id') || '');
   const days = [7, 14, 30, 60].includes(Number(form.get('days'))) ? Number(form.get('days')) : 14;
+  let step = 'token';
   try {
     const token = await linearToken(env, inst);
+    step = 'team';
     const team = (await linearGql(token, 'query($id: String!) { team(id: $id) { id name } }', { id: teamId })).team;
+    step = 'label';
     const labelId = await ensureLabel(token, team.id);
     await env.DB.prepare('UPDATE linear_installs SET team_id = ?, team_name = ?, label_id = ?, days_ahead = ?, backlog = 1 WHERE id = ?')
       .bind(team.id, team.name, labelId, days, id)
       .run();
   } catch (e) {
-    return errorPage(e.message, '/linear/setup');
+    console.error('linear setup failed at', step, e.message);
+    return errorPage(`${e.message} (step: ${step})`, '/linear/setup');
   }
   const fresh = await env.DB.prepare('SELECT * FROM linear_installs WHERE id = ?').bind(id).first();
   await syncLinear(env, fresh, 40);
@@ -689,7 +699,9 @@ function fmtDate(iso) {
 function issueBody(h) {
   const kind = TYPE_LABEL[h.type] || h.type;
   return [
-    `**${fmtDate(h.date)}** is an Indonesian public holiday: **${h.name}** (${kind.toLowerCase()}).`,
+    h.type === 'cuti_bersama'
+      ? `**${fmtDate(h.date)}** is a cuti bersama day in Indonesia: **${h.name}**.`
+      : `**${fmtDate(h.date)}** is an Indonesian public holiday: **${h.name}** (${kind.toLowerCase()}).`,
     '',
     h.type === 'cuti_bersama'
       ? 'This is a cuti bersama (joint leave) day set by the SKB 3 Menteri. Many companies and government offices close, so plan reviews, releases and on-call around it.'

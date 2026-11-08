@@ -1,6 +1,8 @@
 name = "api-indonesia-integrations"
 main = "src/index.js"
 compatibility_date = "2026-10-01"
+# use.apiindonesia.id is a Worker on the same zone; route the call over the public internet.
+compatibility_flags = ["global_fetch_strictly_public"]
 workers_dev = false
 
 routes = [
